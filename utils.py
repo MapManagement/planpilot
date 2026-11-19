@@ -55,6 +55,13 @@ def parse_arguments():
         "it from the instance filename.",
     )
     parser.add_argument(
+        "-hy",
+        "--hypotheses",
+        default=None,
+        help="(Optional) The path to the hypotheses file for goal recognition.",
+    )
+
+    parser.add_argument(
         "--partial-plan", help="The path to the file containing partial plan."
     )
     parser.add_argument(
@@ -82,7 +89,7 @@ def parse_arguments():
         "--encoding",
         default="exact",
         type=str,
-        choices=["exact", "bounded"],
+        choices=["exact", "bounded", "recognition"],
         help="Type of ASP encoding.",
     )
     parser.add_argument(

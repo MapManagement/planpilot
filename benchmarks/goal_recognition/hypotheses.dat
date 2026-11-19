@@ -1,0 +1,3 @@
+(AND (ON D C) (ON C B) (ON B A))
+(AND (ON C D) (ON D B) (ON B A))
+(AND (ON B D) (ON D C) (ON C A))

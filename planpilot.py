@@ -1,12 +1,15 @@
 #! /usr/bin/env python3
 import logging
 import os
+import re
 import sys
 from subprocess import PIPE, Popen
 
 from fasb import start_fasb, start_fasb_interpreter
 
 import utils
+
+TOKEN = re.compile(r'\(([A-Za-z0-9_\-]+)((?:\s+[A-Za-z0-9_\-]+)*)\)')
 
 logging.basicConfig(
     stream=sys.stdout,
@@ -49,7 +52,7 @@ def run_fd_translator(domain, instance):
         exit(process.returncode)
 
 
-def run_plasp(domain, instance, lp, encoding, dump_output, pddl_instance=True):
+def run_plasp(domain, instance, lp, encoding, dump_output, pddl_instance=True, hypotheses=None):
     binary_path = fix_path("bin/plasp")
     command = [binary_path, "translate", instance]  # SAS+ instance
     if pddl_instance:
@@ -60,6 +63,9 @@ def run_plasp(domain, instance, lp, encoding, dump_output, pddl_instance=True):
         encoding = fix_path("encodings/exact-sequential-horizon.lp")
         if args.encoding == "bounded":
             encoding = fix_path("encodings/bounded-sequential-horizon.lp")
+        elif args.encoding == "recognition":
+            encoding = fix_path("encodings/recognition-bounded-sequential-horizon.lp")
+
         with open(encoding) as seq_encoding:
             lp_file.write(seq_encoding.read())
 
@@ -98,6 +104,10 @@ def run_plasp(domain, instance, lp, encoding, dump_output, pddl_instance=True):
             constraints = args.add_constraints.encode().decode("unicode_escape")
             lp_file.write("\n%%%%%%% partial plan encoding\n" + constraints + "\n")
 
+        if args.encoding == "recognition":
+            lp_file.write(generate_goal_hypotheses(hypotheses))
+            lp_file.write("#show test_goal/1.")
+
         # Now, we run plasp to produce the instance-specific info
         process = Popen(command, stdout=lp_file, stdin=PIPE, stderr=PIPE, text=True)
 
@@ -111,9 +121,12 @@ def run_plasp(domain, instance, lp, encoding, dump_output, pddl_instance=True):
         exit(process.returncode)
 
 
-def run_fasb(lp, horizon, script=None):
+def run_fasb(lp, horizon, script=None, is_recognition=False):
     # Parameter arguments are still needed for clingo
     clingo_args = ["-c", f"horizon={horizon}", "0"]
+
+    if is_recognition:
+        clingo_args.append("--project")
 
     # TODO: The parameter is reversed due to the Python bindings
     compute_facets = not args.dry
@@ -205,12 +218,70 @@ def translate_action_to_constraint(action: str, at: int) -> str:
         + f")),{at+1})."
     )
 
+def goal_rec_set_pddl_goal(instance_file_path: str, hypotheses_file_path: str):
+    with open(instance_file_path, "r") as instance_file:
+        instance_content = instance_file.read()
+
+    with open(hypotheses_file_path, "r") as hypotheses_file:
+        first_hypothesis = hypotheses_file.readline()
+
+    instance_h0_content = instance_content.replace("<HYPOTHESIS>", first_hypothesis)
+    instance_h0_path = fix_path("benchmarks/goal_recognition/instance_h0.pddl")
+
+    with open(instance_h0_path, "w+") as instance_h0_file:
+        instance_h0_file.write(instance_h0_content)
+
+    return instance_h0_path
+
+def atom_name(pred, args):
+    pred = pred.lower()
+    args = [a.lower() for a in args]
+
+    if args:
+        return f"{pred}({', '.join(args)})"
+    else:
+        return pred
+
+def generate_goal_hypotheses(hypotheses_file_path: str):
+    lp_goal_hypotheses = ""
+
+    with open(hypotheses_file_path, "r") as hypotheses_file:
+        for hyp_number, line in enumerate(hypotheses_file.readlines()):
+            line = line.strip()
+
+            if not line:
+                continue
+
+            hyp_name = f"h{hyp_number}"
+            lp_goal_hypotheses += f"\n%%%%% {hyp_name} %%%%%"
+            lp_goal_hypotheses += f"\ncandidate_goal({hyp_name})."
+
+            for pred, args in TOKEN.findall(line):
+                if pred.upper() == "AND":
+                    continue
+
+                name = atom_name(pred, args.split())
+                lp_goal_hypotheses += f'\nhyp_goal({hyp_name}, "{name}").'
+
+            lp_goal_hypotheses += "\n"
+
+    return lp_goal_hypotheses
+
+def remove_fixed_goal_from_lp(lp_file_path: str):
+    with open(lp_file_path, "r") as f:
+        lines = [line for line in f if not line.startswith("goal(")]
+
+    with open(lp_file_path, "w") as f:
+        f.writelines(lines)
+
 
 if __name__ == "__main__":
     args = utils.parse_arguments()
 
     domain_file = args.domain
     instance_file = args.instance
+    hypotheses_file = args.hypotheses
+
     if args.is_pddl_instance and not os.path.isfile(domain_file):
         sys.stderr.write("Error: Domain file does not exist.\n")
         sys.exit()
@@ -218,9 +289,18 @@ if __name__ == "__main__":
         sys.stderr.write("Error: Instance file does not exist.\n")
         sys.exit()
 
+    if args.encoding == "recognition" and not os.path.isfile(hypotheses_file):
+        sys.stderr.write("Error: Mode recognition but hypotheses file does not exist.\n")
+        sys.exit()
+
     if args.is_pddl_instance:
         logger.info("Running translator...")
-        run_fd_translator(args.domain, args.instance)
+        instance = args.instance
+
+        if args.encoding == "recognition":
+            instance = goal_rec_set_pddl_goal(args.instance, args.hypotheses)
+
+        run_fd_translator(args.domain, instance)
         args.instance = "output.sas"
         # run_plasp(
         #     args.domain,
@@ -230,10 +310,13 @@ if __name__ == "__main__":
         #     args.dump_output)
 
     logger.info("Running plasp...")
-    run_plasp("", args.instance, args.lp_name, args.encoding, args.dump_output, False)
+    run_plasp("", args.instance, args.lp_name, args.encoding, args.dump_output, False, hypotheses_file)
+
+    if args.encoding == "recognition":
+        remove_fixed_goal_from_lp(args.lp_name)
 
     logger.info("Running fasb...")
-    run_fasb(args.lp_name, args.horizon, args.script)
+    run_fasb(args.lp_name, args.horizon, args.script, args.encoding == "recognition")
 
     if args.cleanup:
         remove_lp_files()
