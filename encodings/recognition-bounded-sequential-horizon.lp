@@ -71,9 +71,11 @@ hyp_goal_atom(Hyp, Var, value(Name, true)) :- hyp_goal(Hyp, Name), contains(Var,
 mapped(Hyp, Name) :- hyp_goal(Hyp, Name), contains(_, value(Name, true)).
 :- hyp_goal(Hyp, Name), not mapped(Hyp, Name).
 
-% Check all goals
-1 { test_goal(G) : candidate_goal(G) } 1.
-:- test_goal(G), hyp_goal_atom(G, V, Val), not holds(V, Val, horizon).
+% Check which goals are achievable
+goal_achieved(Hyp) :- candidate_goal(Hyp), holds(Var, Val, horizon) : hyp_goal_atom(Hyp, Var, Val).
 
+% SAT if any goal can be achieved
+goal :- goal_achieved(Hyp).
+:- not goal.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#project goal_achieved/1.
