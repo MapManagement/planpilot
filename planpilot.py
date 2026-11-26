@@ -104,18 +104,22 @@ def run_plasp(domain, instance, lp, encoding, dump_output, pddl_instance=True, h
             constraints = args.add_constraints.encode().decode("unicode_escape")
             lp_file.write("\n%%%%%%% partial plan encoding\n" + constraints + "\n")
 
-        if args.encoding == "recognition":
-            lp_file.write(generate_goal_hypotheses(hypotheses))
-            lp_file.write("#show test_goal/1.")
-
+       
         # Now, we run plasp to produce the instance-specific info
         process = Popen(command, stdout=lp_file, stdin=PIPE, stderr=PIPE, text=True)
 
+
     time = utils.get_elapsed_time()
     _, error = process.communicate()
-    logging.info(f"plasp time: {utils.get_elapsed_time() - time:.2f}s")
 
+    if args.encoding == "recognition":
+        with open(lp, "a") as unfinished_lp_file:
+            unfinished_lp_file.write(generate_goal_hypotheses(hypotheses, lp))
+            unfinished_lp_file.write("\n#show goal_achieved/1.\n")
+
+    logging.info(f"plasp time: {utils.get_elapsed_time() - time:.2f}s")
     logger.info(f"plasp return code: {process.returncode}")
+
     if process.returncode != 0:
         print(error)
         exit(process.returncode)
@@ -242,8 +246,11 @@ def atom_name(pred, args):
     else:
         return pred
 
-def generate_goal_hypotheses(hypotheses_file_path: str):
+def generate_goal_hypotheses(hypotheses_file_path: str, lp_file_path: str):
     lp_goal_hypotheses = ""
+
+    contains_lines = [line for line in open(lp_file_path, "r").readlines() if
+        line.startswith("contains(variable(")]
 
     with open(hypotheses_file_path, "r") as hypotheses_file:
         for hyp_number, line in enumerate(hypotheses_file.readlines()):
@@ -261,7 +268,16 @@ def generate_goal_hypotheses(hypotheses_file_path: str):
                     continue
 
                 name = atom_name(pred, args.split())
-                lp_goal_hypotheses += f'\nhyp_goal({hyp_name}, "{name}").'
+
+                for contains_line in contains_lines:
+                    if name not in contains_line:
+                        continue
+
+                    var_number = re.search(r"variable\((\d+)\)", contains_line).group(1)
+                    # TODO: what about NOT variables?
+                    var_value = "true"
+
+                    lp_goal_hypotheses += f'\nhyp_goal_atom({hyp_name}, variable({var_number}), value("{name}", true)).'
 
             lp_goal_hypotheses += "\n"
 

@@ -64,11 +64,8 @@ holds(variable(V), Value, T) :- holds(variable(V), Value, T - 1), not modified(v
 % Iterate through hypotheses goals
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Map goals to actual variable names/numbers
-hyp_goal_atom(Hyp, Var, value(Name, true)) :- hyp_goal(Hyp, Name), contains(Var, value(Name, true)).
-
 % Fail if hypothesis cannot be mapped to a variable
-mapped(Hyp, Name) :- hyp_goal(Hyp, Name), contains(_, value(Name, true)).
+mapped(Hyp, Name) :- hyp_goal_atom(Hyp, Var, value(Name, Val)), contains(Var, value(Name, Val)).
 :- hyp_goal(Hyp, Name), not mapped(Hyp, Name).
 
 % Check which goals are achievable
@@ -79,3 +76,4 @@ goal :- goal_achieved(Hyp).
 :- not goal.
 
 #project goal_achieved/1.
+
